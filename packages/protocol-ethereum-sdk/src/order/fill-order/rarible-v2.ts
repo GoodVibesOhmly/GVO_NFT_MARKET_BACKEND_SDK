@@ -35,7 +35,7 @@ export class RaribleV2OrderHandler implements OrderHandler<RaribleV2OrderFillReq
 
 	async approve(order: SimpleRaribleV2Order, infinite: boolean): Promise<void> {
 		const withFee = this.getMakeAssetWithFee(order)
-		await waitTx(approve(this.ethereum, this.send, this.config.transferProxies, order.maker, withFee, infinite))
+		//await waitTx(approve(this.ethereum, this.send, this.config.transferProxies, order.maker, withFee, infinite))
 	}
 
 	async sendTransaction(
@@ -49,7 +49,9 @@ export class RaribleV2OrderHandler implements OrderHandler<RaribleV2OrderFillReq
 			orderToStruct(this.ethereum, inverted),
 			fixSignature(inverted.signature) || "0x",
 		)
-		return this.send(method, this.getMatchV2Options(initial, inverted))
+		console.log("data is", method.data)
+		return null as any
+		//return this.send(method, this.getMatchV2Options(initial, inverted))
 	}
 
 	private async fixForTx(order: SimpleRaribleV2Order): Promise<any> {
