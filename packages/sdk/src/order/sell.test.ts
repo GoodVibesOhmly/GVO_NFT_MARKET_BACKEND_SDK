@@ -11,13 +11,14 @@ import { createE2eProvider, createE2eWallet } from "@rarible/ethereum-sdk-test-c
 import { toBn } from "@rarible/utils"
 import { getEthereumConfig } from "../config"
 import { getApiConfig } from "../config/api-config"
-import type { ERC721RequestV3 } from "../nft/mint"
+import type { ERC721RequestV3, ERC1155RequestV2} from "../nft/mint"
 import { mint as mintTemplate } from "../nft/mint"
 import { createTestProviders } from "../common/create-test-providers"
 import { send as sendTemplate } from "../common/send-transaction"
 import { signNft as signNftTemplate } from "../nft/sign-nft"
-import { createErc721V3Collection } from "../common/mint"
+import { createErc1155V2Collection, createErc721V3Collection } from "../common/mint"
 import { delay } from "../common/retry"
+import { createEthereumApis } from "../common/apis"
 import { OrderSell } from "./sell"
 import { signOrder as signOrderTemplate } from "./sign-order"
 import { RaribleV2OrderHandler } from "./fill-order/rarible-v2"
@@ -27,6 +28,7 @@ import { checkAssetType as checkAssetTypeTemplate } from "./check-asset-type"
 import { OpenSeaOrderHandler } from "./fill-order/open-sea"
 import { RaribleV1OrderHandler } from "./fill-order/rarible-v1"
 import { TEST_ORDER_TEMPLATE } from "./test/order"
+import * as order from "./"
 
 const { provider, wallet } = createE2eProvider(
 	"d519f025ae44644867ee8384890c4a0b8a7b00ef844e8d64c566c0ac971c9469"
@@ -35,6 +37,8 @@ const { providers } = createTestProviders(provider, wallet)
 
 describe.each(providers)("sell", (ethereum) => {
 	const configuration = new Configuration(getApiConfig("e2e"))
+	const apis = createEthereumApis("e2e")
+
 	const nftCollectionApi = new NftCollectionControllerApi(configuration)
 	const gatewayApi = new GatewayControllerApi(configuration)
 	const nftLazyMintApi = new NftLazyMintControllerApi(configuration)
@@ -44,6 +48,10 @@ describe.each(providers)("sell", (ethereum) => {
 	const v2Handler = new RaribleV2OrderHandler(ethereum, send, config)
 	const signOrder = signOrderTemplate.bind(null, ethereum, config)
 	const checkAssetType = checkAssetTypeTemplate.bind(null, nftCollectionApi)
+	const checkLazyAssetType = order.checkLazyAssetType.bind(null, apis.nftItem)
+	const checkLazyAsset = order.checkLazyAsset.bind(null, checkLazyAssetType)
+	const checkLazyOrder = order.checkLazyOrder.bind(null, checkLazyAsset)
+
 	const signNft = signNftTemplate.bind(null, ethereum, config.chainId)
 	const mint = mintTemplate
 		.bind(null, ethereum, send, signNft, nftCollectionApi)
@@ -59,14 +67,17 @@ describe.each(providers)("sell", (ethereum) => {
 	)
 	const upserter = new UpsertOrder(
 		orderService,
-		(x) => Promise.resolve(x),
+		checkLazyOrder,
 		() => Promise.resolve(undefined),
 		signOrder,
 		orderApi,
 		ethereum
 	)
 	const orderSell = new OrderSell(upserter, checkAssetType)
+
 	const e2eErc721V3ContractAddress = toAddress("0x22f8CE349A3338B15D7fEfc013FA7739F5ea2ff7")
+	const e2eErc1155V2ContractAddress = toAddress("0x268dF35c389Aa9e1ce0cd83CF8E5752b607dE90d")
+
 	const treasury = createE2eWallet()
 	const treasuryAddress = toAddress(treasury.getAddressString())
 
@@ -133,7 +144,7 @@ describe.each(providers)("sell", (ethereum) => {
 			maker: makerAddress,
 			make: {
 				assetType: {
-					assetClass: "ERC721",
+					assetClass: "ERC1155",
 					contract: minted.contract,
 					tokenId: minted.tokenId,
 				},
@@ -164,4 +175,71 @@ describe.each(providers)("sell", (ethereum) => {
 		})
 		expect(updatedOrder.take.value.toString()).toBe(nextPrice.toString())
 	})
+
+	test("create order with lazy erc-721 v3 works", async () => {
+		const makerAddress = toAddress(wallet.getAddressString())
+		const minted = await mint({
+			collection: createErc721V3Collection(e2eErc721V3ContractAddress),
+			uri: "uri",
+			creators: [{
+				account: makerAddress,
+				value: 10000,
+			}],
+			royalties: [],
+			lazy: true,
+		} as ERC721RequestV3)
+
+		const order = await orderSell.sell({
+			maker: makerAddress,
+			makeAssetType: {
+				contract: minted.contract,
+				tokenId: minted.tokenId,
+			},
+			price: toBn("2"),
+			takeAssetType: {
+				assetClass: "ETH",
+			},
+			amount: 1,
+			payouts: [],
+			originFees: [{
+				account: treasuryAddress,
+				value: 100,
+			}],
+		})
+
+		expect(order.hash).toBeTruthy()
+	})
+
+	test("create lazy erc-1155 v2 works", async () => {
+		const makerAddress = toAddress(wallet.getAddressString())
+		const minted = await mint({
+			collection: createErc1155V2Collection(e2eErc1155V2ContractAddress),
+			uri: "uri",
+			creators: [{account: makerAddress, value: 10000}],
+			royalties: [],
+			lazy: true,
+			supply: 10,
+		} as ERC1155RequestV2)
+
+		const order = await orderSell.sell({
+			maker: makerAddress,
+			makeAssetType: {
+				contract: minted.contract,
+				tokenId: minted.tokenId,
+			},
+			price: toBn("2"),
+			takeAssetType: {
+				assetClass: "ETH",
+			},
+			amount: 1,
+			payouts: [],
+			originFees: [{
+				account: treasuryAddress,
+				value: 100,
+			}],
+		})
+
+		expect(order.hash).toBeTruthy()
+	})
+
 })
